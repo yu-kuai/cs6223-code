@@ -115,7 +115,11 @@ sbatch scripts/slurm/03_download_vqa.sbatch        # ScienceQA image seeds + Qwe
 
 After the setup above:
 
-1. Baseline answers (finds the questions each model always gets right): `sbatch scripts/slurm/10_baseline.sbatch`, `sbatch scripts/slurm/11_baseline_vqa.sbatch`
+1. Baseline answers (finds the questions each model always gets right), one job per model, e.g.:
+   ```
+   sbatch --gres=gpu:a100-80:1 -J baseline_qwen3-8b scripts/slurm/10_baseline.sbatch Qwen/Qwen3-8B qwen3-8b
+   ```
+   Use `scripts/slurm/11_baseline_vqa.sbatch` for the image models.
 2. One fuzzing run ("Guarded" settings), e.g. 8B text, seed 0:
    ```
    RUN_SUFFIX=_v4 scripts/submit_fuzz.sh 8b full 5000 \
