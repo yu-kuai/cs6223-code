@@ -1,0 +1,24 @@
+# large / machine-specific
+env.tar
+hf_cache/
+__pycache__/
+*.pyc
+src/_backup_v1/
+# raw data images (re-create with scripts/prepare_scienceqa.py)
+data/scienceqa_img/
+# generated run artifacts
+results/fuzz*/**/images/
+results/**/vllm_*.log
+results/**/*_raw.jsonl
+results/multi_logs/
+# secrets (never commit)
+*.env
+.env*
+# code only: no data, results, logs or write-ups in this repository
+data/
+results/
+docs/
+*.log
+slurm_logs/
+# personal helper, not part of the project
+scripts/slurm/90_claude_remote.sbatch
