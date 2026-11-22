@@ -72,27 +72,58 @@ See the report for details.
 | `programs/seed*/` | Hand-written seed programs (text, image; `_hidden` = answer-free versions) |
 | `scripts/` | Data preparation and Slurm job scripts |
 
+## Set up the environment
+
+You need: Linux x86_64, NVIDIA GPUs, conda, and an OpenAI-compatible API for the judge (GLM) and the grader (DeepSeek).
+GPUs we used, one per run: A100 40 GB for 1.7B / VL-2B, A100 80 GB for 8B / VL-8B, H100 96 GB for 32B / VL-32B.
+
+**1. Python packages** (we used Python 3.11, vLLM 0.33.0, PyTorch 2.14.0 + CUDA 13.0, transformers 5.20.2, Pillow 13.0.0):
+```
+conda create -y -p ./env python=3.11
+conda activate ./env
+pip install -U pip
+pip install vllm==0.33.0 datasets pandas "huggingface_hub[cli]" sentence-transformers rapidfuzz tqdm
+python -c "import vllm, torch; print(vllm.__version__, torch.__version__)"
+```
+On our Slurm cluster we built the same environment with `sbatch scripts/slurm/00_setup_env.sbatch` instead.
+It builds the env on the node's local `/tmp` and packs it into `env.tar`, because the shared disk is slow with many
+small files. Every job then unpacks it with `activate_env` from `scripts/slurm/common.sh`.
+
+**2. Your paths.** The Slurm scripts contain the paths of our cluster. Change them to your own:
+- `PROJ` (this folder), `ENV_PREFIX` and `ENV_TAR` in `scripts/slurm/common.sh`
+- the `source .../common.sh` line and the `#SBATCH -o` log path at the top of each `scripts/slurm/*.sbatch`
+
+Models are stored in `HF_HOME=$PROJ/hf_cache`; jobs run with `HF_HUB_OFFLINE=1`, so download first (step 4).
+
+**3. API key for the judge and grader.** Create this file (it is never committed; `*.env` is in `.gitignore`):
+```
+~/.config/soclaas/soclaas.env
+SOCLAAS_BASE_URL=https://<your OpenAI-compatible endpoint>/v1
+SOCLAAS_API_KEY=<your key>
+```
+`src/llm_client.py` reads it. The model ids we used are `x-test-1` (GLM-5.3-Flash, judge) and `x-test-2`
+(DeepSeek-V4.1-Flash, grader); with another provider, pass its model ids to `--judge-api` and `--model`.
+
+**4. Data and models** (one Slurm job each; they also write `data/`):
+```
+sbatch scripts/slurm/01_download.sbatch            # MMLU seeds + Qwen3 1.7B / 8B / 32B
+sbatch scripts/slurm/02_download_embedder.sbatch   # all-MiniLM-L6-v2 (groups similar failures)
+sbatch scripts/slurm/03_download_vqa.sbatch        # ScienceQA image seeds + Qwen3-VL 2B / 8B / 32B
+```
+
 ## How to run
 
-Needs a Slurm GPU cluster, vLLM, and an OpenAI-compatible API for the judge/grader.
-The Slurm scripts contain the paths of our cluster (`PROJ` in `scripts/slurm/common.sh` and the `#SBATCH -o` log lines); change them to your own.
+After the setup above:
 
-1. API settings (never commit this file):
-   ```
-   ~/.config/soclaas/soclaas.env
-   SOCLAAS_BASE_URL=...
-   SOCLAAS_API_KEY=...
-   ```
-2. Data: `python scripts/prepare_mmlu.py`, `python scripts/prepare_scienceqa.py`
-3. Baseline answers: `scripts/slurm/10_baseline.sbatch`, `scripts/slurm/11_baseline_vqa.sbatch`
-4. One fuzzing run ("Guarded" settings), e.g. 8B text, seed 0:
+1. Baseline answers (finds the questions each model always gets right): `sbatch scripts/slurm/10_baseline.sbatch`, `sbatch scripts/slurm/11_baseline_vqa.sbatch`
+2. One fuzzing run ("Guarded" settings), e.g. 8B text, seed 0:
    ```
    RUN_SUFFIX=_v4 scripts/submit_fuzz.sh 8b full 5000 \
      --judge-api x-test-1 --hide-answer --fixed-checks --v4-checks --max-share 0.25 \
      --test-repairs --rich-repair --bold --max-programs 12 --seed 0
    ```
    Use `vl-2b / vl-8b / vl-32b` for images. Use strategy `fixed` for the Static baseline.
-5. Grade: `python src/judge_api_grade.py <run_dir> --model x-test-2 --tag deepseek`
-6. Tables: `python src/compare_v2.py`, `python src/compare_v2.py --strict`, `python src/compare_v2.py --task vqa`
+3. Grade: `python src/judge_api_grade.py <run_dir> --model x-test-2 --tag deepseek`
+4. Tables: `python src/compare_v2.py`, `python src/compare_v2.py --strict`, `python src/compare_v2.py --task vqa`
 
-Data, model weights, run logs and results are not in the repository (see `.gitignore`). Data is re-created in step 2; results in steps 4–6.
+Data, model weights, run logs and results are not in the repository (see `.gitignore`). Data is re-created in setup step 4; results in steps 2–4 above.
